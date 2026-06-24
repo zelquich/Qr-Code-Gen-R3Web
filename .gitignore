@@ -1,0 +1,43 @@
+# Python environment
+.venv/
+venv/
+ENV/
+env/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyCharm / VS Code
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Generated output
+output/
+
+# ReportLab / PDF cache
+*.pdf
+
+# Segno QR code output
+*.png
+*.svg
+*.eps
+
+# Local environment and editor metadata
+*.sqlite3
+*.db
+*.log
