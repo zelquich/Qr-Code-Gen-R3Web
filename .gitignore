@@ -33,9 +33,9 @@ output/
 *.pdf
 
 # Segno QR code output
-*.png
-*.svg
-*.eps
+output/*.png
+output/*.svg
+output/*.eps
 
 # Local environment and editor metadata
 *.sqlite3
