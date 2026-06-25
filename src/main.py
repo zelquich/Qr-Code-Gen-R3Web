@@ -3,7 +3,7 @@ import argparse
 import logging
 from utils import logger
 from config import config
-from data_loader import read_equipment_csv, read_lieu_csv, link_equipment_to_lieux, build_lieu_hierarchy_paths
+from data_loader import read_equipment_csv, read_lieu_csv, build_hierarchy
 from qr_generator import generate_qr_codes
 from pdf_generator import register_fonts, generate_labels_pdf_for_group
 
@@ -41,21 +41,17 @@ def main():
         register_fonts()
         
         # Load data from CSV files
-        equipment_items, equipment_to_parent_lieu = read_equipment_csv()
+        equipment_items = read_equipment_csv()
         if not equipment_items:
             logger.error("No equipment items loaded from CSV. Exiting.")
             sys.exit(1)
         
-        lieu_items, lieu_hierarchy = read_lieu_csv()
+        lieu_items = read_lieu_csv()
         if not lieu_items:
             logger.error("No lieu items loaded from CSV. Exiting.")
             sys.exit(1)
         
-        # Link equipment to their parent lieux
-        equipment_items = link_equipment_to_lieux(equipment_items, lieu_items, equipment_to_parent_lieu)
-        
-        # Build lieu hierarchy paths
-        lieu_paths = build_lieu_hierarchy_paths(equipment_items)
+        lieu_paths = build_hierarchy(equipment_items, lieu_items)
         
         # Generate QR codes and directories
         generate_qr_codes(equipment_items, lieu_items, lieu_paths)

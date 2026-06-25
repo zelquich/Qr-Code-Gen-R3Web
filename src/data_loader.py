@@ -1,192 +1,178 @@
 import os
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional, Callable, TypeVar
 from pathlib import Path
 from models import EquipmentItem, Lieu
 from config import config
 from utils import logger, check_file_exists, slugify
 
+T = TypeVar("T")
 
-def read_equipment_csv(file_path: Path | None = None) -> tuple[List[EquipmentItem], Dict[int, int]]:
-    """
-    Read equipment data from CSV file.
-    
-    Returns:
-        Tuple of (equipment items, equipment_id -> parent_lieu_id mapping)
-    """
+
+def _read_csv(
+    file_path: Path,
+    description: str,
+    builder: Callable[[pd.Series], Optional[T]],
+) -> List[T]:
+    """Generic CSV reader that validates, parses, and returns a list of items."""
+    if not check_file_exists(file_path, description):
+        logger.error(f"Cannot read {description}: {file_path}")
+        return []
+
+    logger.info(f"Reading {description}: {file_path}")
+    try:
+        df = pd.read_csv(file_path, delimiter=";")
+        df.columns = [c.strip() for c in df.columns]
+    except Exception as e:
+        logger.error(f"Failed to read {description}: {e}")
+        return []
+
+    items: List[T] = []
+    for _, row in df.iterrows():
+        try:
+            item = builder(row)
+            if item is not None:
+                items.append(item)
+        except Exception as e:
+            logger.debug(f"Skipping invalid row in {description}: {e}")
+
+    logger.info(f"Loaded {len(items)} items from {description}")
+    return items
+
+
+def read_equipment_csv(file_path: Optional[Path] = None) -> List[EquipmentItem]:
+    """Read equipment CSV, returning a list of EquipmentItem (no parent set yet)."""
     if file_path is None:
         file_path = config.equipement_path_csv_path
-    
-    if not check_file_exists(file_path, "Equipment CSV file"):
-        logger.error(f"Cannot read Equipment CSV file: {file_path}")
-        return [], {}
-    
-    logger.info(f"Reading Equipment CSV file: {file_path}")
-    
-    try:
-        df = pd.read_csv(file_path, delimiter=';')
-        # Clean column names
-        df.columns = [c.strip() for c in df.columns]
-    except Exception as e:
-        logger.error(f"Failed to read Equipment CSV file: {e}")
-        return [], {}
-    
-    items: List[EquipmentItem] = []
-    equipment_to_parent_lieu: Dict[int, int] = {}
-    
-    for _, row in df.iterrows():
-        try:
-            name = str(row.get("Equipment Name", "")).strip()
-            equipment_id = int(row.get("Equipment ID", -1))
-            id_path = str(row.get("ID Path", "")).strip()
-            lieu_path = str(row.get("Lieu Path", "")).strip()
-            
-            if not name:
-                logger.debug("Skipping row with empty equipment name")
-                continue
-            
-            # Extract parent lieu ID from ID Path (last ID in the path)
-            parent_lieu_id = None
-            if id_path:
-                try:
-                    parent_lieu_id = int(id_path.split(">")[-1])
-                    equipment_to_parent_lieu[equipment_id] = parent_lieu_id
-                except (ValueError, IndexError):
-                    logger.debug(f"Could not parse ID Path for equipment {equipment_id}: {id_path}")
-            
-            item = EquipmentItem(
-                name=name,
-                Id=equipment_id,
-                parent=None,  # Will be set later when linking to lieux
-                lieu_path=lieu_path,
-                id_path=id_path
-            )
-            items.append(item)
-            
-        except (ValueError, TypeError, KeyError) as e:
-            logger.debug(f"Skipping invalid equipment row: {e}")
-            continue
-    
-    logger.info(f"Loaded {len(items)} equipment items from CSV")
-    return items, equipment_to_parent_lieu
+
+    def builder(row) -> Optional[EquipmentItem]:
+        name = str(row.get("Equipment Name", "")).strip()
+        if not name:
+            return None
+        equipment_id = int(row.get("Equipment ID", -1))
+        id_path = str(row.get("ID Path", "")).strip()
+        lieu_path = str(row.get("Lieu Path", "")).strip()
+        return EquipmentItem(
+            name=name,
+            Id=equipment_id,
+            lieu_path=lieu_path,
+            id_path=id_path,
+        )
+
+    return _read_csv(file_path, "Equipment CSV file", builder)
 
 
-def read_lieu_csv(file_path: Path | None = None) -> tuple[List[Lieu], Dict[int, int]]:
-    """
-    Read lieu data from CSV file.
-    
-    Returns:
-        Tuple of (lieu items, lieu_id -> parent_lieu_id mapping)
-    """
+def read_lieu_csv(file_path: Optional[Path] = None) -> List[Lieu]:
+    """Read Lieu CSV, returning a list of Lieu (no parent nor children set yet)."""
     if file_path is None:
         file_path = config.Lieu_csv_path
-    
-    if not check_file_exists(file_path, "Lieu CSV file"):
-        logger.error(f"Cannot read Lieu CSV file: {file_path}")
-        return [], {}
-    
-    logger.info(f"Reading Lieu CSV file: {file_path}")
-    
-    try:
-        df = pd.read_csv(file_path, delimiter=';')
-        # Clean column names
-        df.columns = [c.strip() for c in df.columns]
-    except Exception as e:
-        logger.error(f"Failed to read Lieu CSV file: {e}")
-        return [], {}
-    
-    items: List[Lieu] = []
-    lieu_hierarchy: Dict[int, int] = {}
-    
-    for _, row in df.iterrows():
-        try:
-            name = str(row.get("Nom", "")).strip()
-            lieu_id = int(row.get("Id_lieu", -1))
-            categorie = str(row.get("Categorie", "")).strip()
-            type_name = str(row.get("Nom_Type", "")).strip()
-            
-            if not name:
-                logger.debug("Skipping row with empty lieu name")
-                continue
-            
-            item = Lieu(
-                name=name,
-                Id=lieu_id,
-                categorie=categorie,
-                type_name=type_name,
-                parent=None  # Will be set later when determining hierarchy
-            )
-            items.append(item)
-            
-        except (ValueError, TypeError, KeyError) as e:
-            logger.debug(f"Skipping invalid lieu row: {e}")
-            continue
-    
-    logger.info(f"Loaded {len(items)} lieu items from CSV")
-    return items, lieu_hierarchy
+
+    def builder(row) -> Optional[Lieu]:
+        name = str(row.get("Nom", "")).strip()
+        if not name:
+            return None
+        lieu_id = int(row.get("Id_lieu", -1))
+        categorie = str(row.get("Categorie", "")).strip()
+        type_name = str(row.get("Nom_Type", "")).strip()
+        return Lieu(
+            name=name,
+            Id=lieu_id,
+            categorie=categorie,
+            type_name=type_name,
+        )
+
+    return _read_csv(file_path, "Lieu CSV file", builder)
 
 
-def link_equipment_to_lieux(
+def build_hierarchy(
     equipment_items: List[EquipmentItem],
     lieu_items: List[Lieu],
-    equipment_to_parent_lieu: Dict[int, int]
-) -> List[EquipmentItem]:
+) -> Dict[int, str]:
     """
-    Link equipment items to their parent lieu items.
-    
-    Args:
-        equipment_items: List of equipment items
-        lieu_items: List of lieu items
-        equipment_to_parent_lieu: Mapping of equipment_id to parent_lieu_id
-    
+    Process the equipment list once to:
+    - Set each equipment's parent Lieu
+    - Build parent/child relationships between Lieux (children_lieux, parent)
+    - Populate each Lieu's equipment_items list
+    - Determine human‑readable paths (lieu_path, id_path) for every Lieu
+    - Return a mapping of lieu_id → slugified directory path for QR codes
+
     Returns:
-        Updated equipment items with parent references set
+        Mapping of lieu_id to directory path (e.g. "qrcodes/US_Open/Intl_Compound")
     """
-    # Create a mapping of lieu IDs to lieu objects
-    lieu_map: Dict[int, Lieu] = {lieu.Id: lieu for lieu in lieu_items}
-    
-    # Link equipment to their parent lieux
+    lieu_by_id = {l.Id: l for l in lieu_items}
+    lieu_paths: Dict[int, str] = {}          # slugified directory paths
+    lieu_raw: Dict[int, tuple] = {}          # (human_lieu_path, human_id_path)
+
     for equip in equipment_items:
-        parent_lieu_id = equipment_to_parent_lieu.get(equip.Id)
-        if parent_lieu_id and parent_lieu_id in lieu_map:
-            equip.parent = lieu_map[parent_lieu_id]
-            logger.debug(f"Linked equipment {equip.name} (ID: {equip.Id}) to lieu {equip.parent.name} (ID: {equip.parent.Id})")
+        # --- Parse id_path and find parent Lieu ---
+        if not equip.id_path:
+            continue
+
+        id_parts_str = [p.strip() for p in equip.id_path.split(">")]
+        try:
+            id_parts = [int(p) for p in id_parts_str]
+        except ValueError:
+            logger.debug(f"Invalid ID path for equipment {equip.name}")
+            continue
+
+        if not id_parts:
+            continue
+
+        # The last ID in the path is the direct parent Lieu of this equipment
+        parent_lieu_id = id_parts[-1]
+        parent_lieu = lieu_by_id.get(parent_lieu_id)
+        if parent_lieu:
+            equip.parent = parent_lieu
+            if equip not in parent_lieu.equipment_items:
+                parent_lieu.equipment_items.append(equip)
+
+        # --- Build Lieu hierarchy (parent/child) from consecutive IDs ---
+        for i in range(len(id_parts) - 1):
+            p_id = id_parts[i]
+            c_id = id_parts[i + 1]
+            parent = lieu_by_id.get(p_id)
+            child = lieu_by_id.get(c_id)
+            if parent and child:
+                if child.parent is None:
+                    child.parent = parent
+                if child not in parent.children_lieux:
+                    parent.children_lieux.append(child)
+
+        # --- Extract directory and human paths using lieu_path ---
+        if not equip.lieu_path:
+            continue
+
+        lieu_parts = [p.strip() for p in equip.lieu_path.split(">")]
+        if len(lieu_parts) != len(id_parts_str):
+            continue
+
+        for i, (lieu_name, lid) in enumerate(zip(lieu_parts, id_parts)):
+            if lid in lieu_paths:
+                continue  # already computed
+            # Slugified directory path
+            dir_comp = [slugify(p) for p in lieu_parts[: i + 1]]
+            full_dir = os.path.join(config.qrcode_dir, *dir_comp)
+            lieu_paths[lid] = full_dir
+            # Human‑readable strings
+            raw_lieu = " > ".join(lieu_parts[: i + 1])
+            raw_id = " > ".join(id_parts_str[: i + 1])
+            lieu_raw[lid] = (raw_lieu, raw_id)
+
+    # --- Assign paths to Lieu objects ---
+    for lieu in lieu_items:
+        if lieu.Id in lieu_raw:
+            lieu.lieu_path, lieu.id_path = lieu_raw[lieu.Id]
+            logger.debug(
+                f"Set paths for Lieu {lieu.name} (ID {lieu.Id}): "
+                f"'{lieu.lieu_path}' / '{lieu.id_path}'"
+            )
         else:
-            logger.debug(f"No parent lieu found for equipment {equip.name} (ID: {equip.Id})")
-    
-    return equipment_items
+            logger.debug(f"No hierarchy path found for Lieu {lieu.name} (ID {lieu.Id})")
 
-
-def build_lieu_hierarchy_paths(equipment_items: List[EquipmentItem]) -> Dict[int, str]:
-    """
-    Build directory paths for all lieux based on equipment hierarchy.
-    
-    Uses both lieu_path and id_path to map lieu IDs to their full directory paths.
-    
-    Returns:
-        Mapping of lieu_id -> directory_path (e.g., "qrcodes/US Open/Int'l Compound")
-    """
-    lieu_paths: Dict[int, str] = {}
-    
-    # Extract hierarchy paths from all equipment
-    for equip in equipment_items:
-        if equip.lieu_path and equip.id_path:
-            lieu_parts = [part.strip() for part in equip.lieu_path.split(">")]
-            id_parts_str = equip.id_path.split(">")
-            
-            try:
-                id_parts = [int(id_str.strip()) for id_str in id_parts_str]
-                
-                # Map each lieu ID to its full path
-                if len(lieu_parts) == len(id_parts):
-                    for i, (lieu_name, lieu_id) in enumerate(zip(lieu_parts, id_parts)):
-                        # Build the path up to and including this lieu, slugifying each part
-                        path_components = [slugify(p) for p in lieu_parts[:i+1]]
-                        full_path = os.path.join(config.qrcode_dir, *path_components)
-                        lieu_paths[lieu_id] = full_path
-                        logger.debug(f"Mapped lieu ID {lieu_id} ({lieu_name}) to path: {full_path}")
-            except (ValueError, IndexError) as e:
-                logger.debug(f"Could not parse ID path for equipment {equip.name}: {e}")
-    
-    logger.info(f"Built directory paths for {len(lieu_paths)} lieux")
+    logger.info(f"Hierarchy built: \n"
+                f"among {len(lieu_items)} Lieux, \n"
+                f"{sum(1 for l in lieu_items if l.children_lieux)} have children Lieux, \n"
+                f"{sum(1 for l in lieu_items if l.equipment_items)} have children equipment, \n"
+                f"{sum(1 for l in lieu_items if l.categorie in {"R", "G"})} are ensemble or sous-ensemble, Lieux (R/G)), \n"
+                f"{len(lieu_paths)} have a path.")
     return lieu_paths
