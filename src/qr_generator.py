@@ -11,15 +11,15 @@ from utils import slugify, ensure_dirs, logger
 # region Font caching
 _FONT_CACHE = None
 
-def _get_font(size: int) -> ImageFont.FreeTypeFont:
+def _get_font(size: int) -> (ImageFont.FreeTypeFont | ImageFont.ImageFont):
     """Get or create a cached font at the given size."""
     global _FONT_CACHE
     if _FONT_CACHE is None or _FONT_CACHE.size != size:
         try:
-            _FONT_CACHE = ImageFont.truetype("Arial.ttf", size)
+            _FONT_CACHE = ImageFont.truetype(config.font_bold_path, size)
         except IOError:
             _FONT_CACHE = ImageFont.load_default()
-    assert _FONT_CACHE is ImageFont.FreeTypeFont, "Font cache could not be created properly."
+    assert isinstance(_FONT_CACHE, (ImageFont.FreeTypeFont, ImageFont.ImageFont)), "Font cache is not a valid font instance"
     return _FONT_CACHE
 # endregion
 
@@ -150,7 +150,7 @@ def _generate_equipment_qr_codes(
         for future in as_completed(futures):
             idx = futures[future]
             try:
-                equipment_items[idx] = future.result()
+                equipment_items[idx] = future.result()# log success on a single lineto avoid cluttering the console
                 logger.debug(f"Generated QR code for equipment {equipment_items[idx].name} (ID: {equipment_items[idx].Id})")
             except Exception as e:
                 logger.error(f"Failed to generate QR code for equipment item at index {idx}: {e}")
